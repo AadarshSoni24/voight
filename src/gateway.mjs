@@ -247,13 +247,13 @@ export function createGateway({ config, store, assets, auth = webauthn(config), 
           }
           if (config.humanCheck !== 'off' && url.pathname === `${PREFIX}human/options`) {
             // A small proof of work rides along, so forging passes without a browser still costs something.
-            const challenge = token(), difficulty = config.challengeDifficulty;
-            store.takeChallenge(cookie(req, ceremonyCookie));
+                        const challenge = token(), difficulty = config.challengeDifficulty;
+            const prev = store.takeChallenge(cookie(req, ceremonyCookie));
             const probe = scrambledProbe();
             // Whether the page came back from the hop page without loading again. Each hop counts once.
             const hopID = typeof body.hop === 'string' && HOP_ID.test(body.hop) ? body.hop : '';
             const hop = hopID && store.takeChallenge(`hop:${hopID}`);
-            const returned = Boolean(hop && hop.kind === 'hop' && hop.ua === digest(ua));
+            const returned = Boolean((hop && hop.kind === 'hop' && hop.ua === digest(ua)) || (prev && prev.returned && prev.ua === digest(ua)));
             if (hopID && cookie(req, hopCookie) === hopID) setCookie(res, hopCookie, '', 0);
             setCookie(res, ceremonyCookie, store.challenge({ kind: 'human', challenge, difficulty, ua: digest(ua), issued: store.now(), probe, returned }), 120);
             outcome = 'human_check_issued'; return send(res, 200, { challenge, difficulty, holdMs: HUMAN_HOLD_MS });

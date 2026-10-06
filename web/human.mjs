@@ -37,7 +37,7 @@ async function work(challenge, difficulty) {
   }
 }
 
-let holdMs = 1500, started = 0, frame = 0, timer = 0, pressGap = -1, pointer = 'unknown', trusted = false, repeats = 0, solution, probe, last;
+let holdMs = 1500, started = 0, frame = 0, timer = 0, pressGap = -1, pointer = 'unknown', trusted = false, repeats = 0, solution, probe, last, ticketIssued = 0, renewTimer = 0, renewing = null, hop;
 // The last steps the pointer took. People move in uneven curves; scripted pointers jump or move in identical steps.
 const path = [];
 addEventListener('pointermove', event => {
@@ -54,6 +54,7 @@ function fail(message) {
 }
 function begin(event, kind) {
   if (button.disabled || started) return;
+  if (Date.now() - ticketIssued >= 100000) renew();
   trusted = event.isTrusted; pointer = kind; repeats = 0; started = performance.now(); setState('holding');
   label.textContent = 'Keep holding…'; status.textContent = '';
   // Animation frames only draw the fill; they pause in covered windows, so a timer completes the hold.
@@ -75,6 +76,7 @@ async function finish() {
   cancelAnimationFrame(frame); button.style.setProperty('--fill', 1);
   started = 0; button.disabled = true; label.textContent = 'Checking…'; setState('checking');
   try {
+    if (renewing) await renewing;
     // The probe measures the browser at the end, so a client that attaches after the page loads is still seen.
     const [nonce, report] = await Promise.all([solution, probe.then(measure => measure.seal({ trusted, holdMs: Math.round(held), pointer, path, pressGap, repeats }))]);
     await post('verify', { nonce, report });
@@ -131,15 +133,53 @@ function roundTrip() {
   });
 }
 
+function scheduleRenew(delay = 90000) {
+  clearTimeout(renewTimer);
+  renewTimer = setTimeout(() => {
+    if (!started) renew();
+    else scheduleRenew(5000);
+  }, delay);
+}
+
+async function renew(isInitial = false) {
+  if (started || renewing) return renewing;
+  clearTimeout(renewTimer);
+  const task = (async () => {
+    if (isInitial) hop = await roundTrip();
+    const options = await post('options', { hop: isInitial ? hop : undefined });
+    holdMs = options.holdMs ?? holdMs;
+    ticketIssued = Date.now();
+    solution = work(options.challenge, options.difficulty);
+    solution.catch(() => {});
+    probe = import(`/_gate/human/probe.js?check=${encodeURIComponent(options.challenge)}`).then(module => module.default());
+    await probe;
+    if (isInitial) {
+      button.disabled = false; setState('ready'); status.textContent = 'Ready.';
+    }
+  })();
+  renewing = task;
+  try {
+    await task;
+    scheduleRenew(90000);
+  } catch (error) {
+    if (isInitial) fail(error.message);
+    else scheduleRenew(10000);
+  } finally {
+    if (renewing === task) renewing = null;
+  }
+  return task;
+}
+
+function onActive() {
+  if (started || button.disabled) return;
+  if (Date.now() - ticketIssued >= 80000) renew();
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') onActive();
+});
+window.addEventListener('focus', onActive);
+
 (async () => {
   if (!crypto.subtle) throw new Error('This browser cannot run the check here. Try a current browser.');
-  const hop = await roundTrip();
-  const options = await post('options', { hop });
-  holdMs = options.holdMs ?? holdMs;
-  solution = work(options.challenge, options.difficulty);
-  solution.catch(() => {});
-  // This check's own measuring script: different names, numbers and report key every time.
-  probe = import(`/_gate/human/probe.js?check=${encodeURIComponent(options.challenge)}`).then(module => module.default());
-  await probe;
-  button.disabled = false; setState('ready'); status.textContent = 'Ready.';
+  await renew(true);
 })().catch(error => fail(error.message));
