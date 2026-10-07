@@ -37,7 +37,7 @@ async function work(challenge, difficulty) {
   }
 }
 
-let holdMs = 1500, started = 0, frame = 0, timer = 0, pressGap = -1, pointer = 'unknown', trusted = false, repeats = 0, solution, probe, last, ticketIssued = 0, renewTimer = 0, renewing = null, hop;
+let holdMs = 1500, started = 0, frame = 0, timer = 0, pressGap = -1, pointer = 'unknown', trusted = false, repeats = 0, solution, probe, last, ticketIssued = 0, ticketReceivedAt = 0, renewing = null, retries = 0, hop;
 // The last steps the pointer took. People move in uneven curves; scripted pointers jump or move in identical steps.
 const path = [];
 addEventListener('pointermove', event => {
@@ -54,7 +54,7 @@ function fail(message) {
 }
 function begin(event, kind) {
   if (button.disabled || started) return;
-  if (Date.now() - ticketIssued >= 100000) renew();
+  if (Date.now() - ticketIssued >= 90000) renew();
   trusted = event.isTrusted; pointer = kind; repeats = 0; started = performance.now(); setState('holding');
   label.textContent = 'Keep holding…'; status.textContent = '';
   // Animation frames only draw the fill; they pause in covered windows, so a timer completes the hold.
@@ -77,6 +77,11 @@ async function finish() {
   started = 0; button.disabled = true; label.textContent = 'Checking…'; setState('checking');
   try {
     if (renewing) await renewing;
+    // Ensure the ticket on the server clock is at least holdMs old before verifying
+    const ticketAge = performance.now() - ticketReceivedAt;
+    if (ticketAge < holdMs) {
+      await new Promise(r => setTimeout(r, Math.ceil(holdMs - ticketAge) + 50));
+    }
     // The probe measures the browser at the end, so a client that attaches after the page loads is still seen.
     const [nonce, report] = await Promise.all([solution, probe.then(measure => measure.seal({ trusted, holdMs: Math.round(held), pointer, path, pressGap, repeats }))]);
     await post('verify', { nonce, report });
@@ -133,22 +138,18 @@ function roundTrip() {
   });
 }
 
-function scheduleRenew(delay = 90000) {
-  clearTimeout(renewTimer);
-  renewTimer = setTimeout(() => {
-    if (!started) renew();
-    else scheduleRenew(5000);
-  }, delay);
-}
-
 async function renew(isInitial = false) {
   if (started || renewing) return renewing;
-  clearTimeout(renewTimer);
   const task = (async () => {
-    if (isInitial) hop = await roundTrip();
-    const options = await post('options', { hop: isInitial ? hop : undefined });
+    // If initial, or if ticket has completely expired (>120s), redo roundTrip if needed
+    if (isInitial || Date.now() - ticketIssued >= 120000) {
+      hop = await roundTrip();
+    }
+    const options = await post('options', { hop });
     holdMs = options.holdMs ?? holdMs;
     ticketIssued = Date.now();
+    ticketReceivedAt = performance.now();
+    retries = 0;
     solution = work(options.challenge, options.difficulty);
     solution.catch(() => {});
     probe = import(`/_gate/human/probe.js?check=${encodeURIComponent(options.challenge)}`).then(module => module.default());
@@ -160,10 +161,15 @@ async function renew(isInitial = false) {
   renewing = task;
   try {
     await task;
-    scheduleRenew(90000);
   } catch (error) {
-    if (isInitial) fail(error.message);
-    else scheduleRenew(10000);
+    if (isInitial) {
+      fail(error.message);
+    } else if (++retries <= 3) {
+      const backoff = Math.min(30000, 5000 * Math.pow(2, retries - 1));
+      setTimeout(() => { if (!started) renew(); }, backoff);
+    } else {
+      fail('The check could not be refreshed. Reload the page to try again.');
+    }
   } finally {
     if (renewing === task) renewing = null;
   }
@@ -172,7 +178,8 @@ async function renew(isInitial = false) {
 
 function onActive() {
   if (started || button.disabled) return;
-  if (Date.now() - ticketIssued >= 80000) renew();
+  // Renew when visitor returns to tab if ticket is over 90s old
+  if (Date.now() - ticketIssued >= 90000) renew();
 }
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') onActive();

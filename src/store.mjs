@@ -67,9 +67,9 @@ export class Store {
     const row = this.db.prepare('SELECT payload FROM challenges WHERE hash=? AND expires>?').get(digest(value ?? ''), this.now());
     return row ? JSON.parse(row.payload) : null;
   }
-  takeChallenge(value) {
+  takeChallenge(value, allowExpired = false) {
     const row = this.db.prepare('DELETE FROM challenges WHERE hash=? RETURNING *').get(digest(value));
-    return row && row.expires > this.now() ? JSON.parse(row.payload) : null;
+    return row && (allowExpired || row.expires > this.now()) ? JSON.parse(row.payload) : null;
   }
   enroll(inviteHash, userID, credential) {
     this.db.exec('BEGIN IMMEDIATE');
