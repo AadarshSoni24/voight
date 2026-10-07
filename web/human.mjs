@@ -37,7 +37,7 @@ async function work(challenge, difficulty) {
   }
 }
 
-let holdMs = 1500, started = 0, frame = 0, timer = 0, pressGap = -1, pointer = 'unknown', trusted = false, repeats = 0, solution, probe, last, ticketIssued = 0, ticketReceivedAt = 0, renewing = null, retries = 0, hop;
+let holdMs = 1500, started = 0, frame = 0, timer = 0, pressGap = -1, pointer = 'unknown', trusted = false, repeats = 0, solution, probe, last, ticketIssued = 0, ticketReceivedAt = 0, renewing = null, retries = 0, hop, hoppedAt = 0;
 // The last steps the pointer took. People move in uneven curves; scripted pointers jump or move in identical steps.
 const path = [];
 addEventListener('pointermove', event => {
@@ -54,7 +54,13 @@ function fail(message) {
 }
 function begin(event, kind) {
   if (button.disabled || started) return;
-  if (Date.now() - ticketIssued >= 90000) renew();
+  if (Date.now() - ticketIssued >= 90000 || (hoppedAt && Date.now() - hoppedAt >= 540000)) {
+    button.disabled = true; label.textContent = 'Wait a moment…'; status.textContent = 'Refreshing the check…';
+    renew().then(() => {
+      button.disabled = false; label.textContent = 'Press and hold'; status.textContent = 'Keep holding until the button fills.';
+    }).catch(error => fail(error.message));
+    return;
+  }
   trusted = event.isTrusted; pointer = kind; repeats = 0; started = performance.now(); setState('holding');
   label.textContent = 'Keep holding…'; status.textContent = '';
   // Animation frames only draw the fill; they pause in covered windows, so a timer completes the hold.
@@ -141,9 +147,10 @@ function roundTrip() {
 async function renew(isInitial = false) {
   if (started || renewing) return renewing;
   const task = (async () => {
-    // If initial, or if ticket has completely expired (>120s), redo roundTrip if needed
-    if (isInitial || Date.now() - ticketIssued >= 120000) {
+    for (const el of Array.from(document.documentElement.children)) { if (el.tagName === 'IFRAME') el.remove(); }
+    if (isInitial || Date.now() - ticketIssued >= 120000 || (hoppedAt && Date.now() - hoppedAt >= 540000)) {
       hop = await roundTrip();
+      if (hop) hoppedAt = Date.now();
     }
     const options = await post('options', { hop });
     holdMs = options.holdMs ?? holdMs;

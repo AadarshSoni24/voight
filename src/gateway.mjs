@@ -249,7 +249,7 @@ export function createGateway({ config, store, assets, auth = webauthn(config), 
           if (config.humanCheck !== 'off' && url.pathname === `${PREFIX}human/options`) {
             // A small proof of work rides along, so forging passes without a browser still costs something.
             const challenge = token(), difficulty = config.challengeDifficulty;
-            const prev = store.takeChallenge(cookie(req, ceremonyCookie), true);
+            const prev = store.takeChallenge(cookie(req, ceremonyCookie));
             const probe = scrambledProbe();
             // Whether the page came back from the hop page without loading again. Each hop counts once.
             const hopID = typeof body.hop === 'string' && HOP_ID.test(body.hop) ? body.hop : '';
