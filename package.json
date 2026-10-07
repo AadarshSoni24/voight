@@ -33,6 +33,7 @@
     "admin": "node --env-file-if-exists=.env src/admin.mjs",
     "test": "node --test test/*.test.mjs",
     "benchmark": "node scripts/benchmark.mjs",
+    "load-test": "node scripts/load-test.mjs",
     "browser:install": "node scripts/install-browser.mjs",
     "benchmark:browser": "npm run build && node scripts/browser-benchmark.mjs",
     "showcase": "node scripts/showcase.mjs",

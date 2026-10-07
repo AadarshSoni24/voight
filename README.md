@@ -126,6 +126,7 @@ Contributions are welcome:
 npm run check            # syntax
 npm test                 # tests (loopback only)
 npm run benchmark        # HTTP extraction scenarios
+npm run load-test        # requests per second through the gateway (loopback)
 npm run browser:install && npm run benchmark:browser   # real Chromium
 npm run attack:agents    # automated browsers vs the check (opens windows)
 ```
